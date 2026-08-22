@@ -622,17 +622,24 @@ def validate_internet_gateway(
         )
     )
 
-    if attachment_state == "attached":
+    valid_attachment_states = {"attached"}
+
+    # LocalStack currently reports IGW attachment state as
+    # "available" instead of the AWS value "attached".
+    if ENVIRONMENT == "localstack":
+        valid_attachment_states.add("available")
+
+    if attachment_state in valid_attachment_states:
         result.passed(
             "Internet Gateway "
-            "attachment state=attached"
+            f"attachment state={attachment_state}"
         )
     else:
         result.failed(
             "Internet Gateway "
-            f"attachment state="
-            f"{attachment_state} "
-            "expected=attached"
+            f"attachment state={attachment_state} "
+            f"expected one of "
+            f"{sorted(valid_attachment_states)}"
         )
 
     return igw_id
