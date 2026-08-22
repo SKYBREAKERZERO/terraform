@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Any
 
 from botocore.exceptions import (
     BotoCoreError,
@@ -12,7 +13,16 @@ from common.config import Config
 
 
 # ============================================================
-# Expected Configuration
+# Runtime Configuration
+# ============================================================
+
+PROJECT_NAME = Config.PROJECT_NAME
+ENVIRONMENT = Config.ENVIRONMENT
+AWS_REGION = Config.AWS_REGION
+
+
+# ============================================================
+# Expected Network Configuration
 # ============================================================
 
 EXPECTED_VPC_CIDR = "10.0.0.0/16"
@@ -59,31 +69,22 @@ EXPECTED_SUBNETS = {
 EXPECTED_NAT_GATEWAY_MODE = os.getenv(
     "NAT_GATEWAY_MODE",
     "single",
-)
+).lower()
 
-REQUIRE_S3_ENDPOINT = (
-    os.getenv(
-        "REQUIRE_S3_ENDPOINT",
-        "true",
-    ).lower()
-    == "true"
-)
+REQUIRE_S3_ENDPOINT = os.getenv(
+    "REQUIRE_S3_ENDPOINT",
+    "true",
+).lower() == "true"
 
-REQUIRE_CUSTOM_NACLS = (
-    os.getenv(
-        "REQUIRE_CUSTOM_NACLS",
-        "false",
-    ).lower()
-    == "true"
-)
+REQUIRE_CUSTOM_NACLS = os.getenv(
+    "REQUIRE_CUSTOM_NACLS",
+    "false",
+).lower() == "true"
 
-REQUIRE_FLOW_LOGS = (
-    os.getenv(
-        "REQUIRE_FLOW_LOGS",
-        "false",
-    ).lower()
-    == "true"
-)
+REQUIRE_FLOW_LOGS = os.getenv(
+    "REQUIRE_FLOW_LOGS",
+    "false",
+).lower() == "true"
 
 
 # ============================================================
@@ -91,25 +92,25 @@ REQUIRE_FLOW_LOGS = (
 # ============================================================
 
 class ValidationResult:
-    def __init__(self):
+    def __init__(self) -> None:
         self.pass_count = 0
-        self.fail_count = 0
         self.warn_count = 0
+        self.fail_count = 0
 
-    def passed(self, message):
+    def passed(self, message: str) -> None:
         print(f"[PASS] {message}")
         self.pass_count += 1
 
-    def failed(self, message):
-        print(f"[FAIL] {message}")
-        self.fail_count += 1
-
-    def warning(self, message):
+    def warning(self, message: str) -> None:
         print(f"[WARN] {message}")
         self.warn_count += 1
 
+    def failed(self, message: str) -> None:
+        print(f"[FAIL] {message}")
+        self.fail_count += 1
+
     @property
-    def success(self):
+    def success(self) -> bool:
         return self.fail_count == 0
 
 
@@ -117,14 +118,18 @@ class ValidationResult:
 # Generic Helpers
 # ============================================================
 
-def section(title):
+def section(title: str) -> None:
     print()
     print("=" * 72)
     print(title)
     print("=" * 72)
 
 
-def get_tag(tags, key, default=None):
+def get_tag(
+    tags: list[dict[str, Any]] | None,
+    key: str,
+    default: str | None = None,
+) -> str | None:
     if not tags:
         return default
 
@@ -138,27 +143,31 @@ def get_tag(tags, key, default=None):
     return default
 
 
-def get_name(tags):
+def get_name(
+    tags: list[dict[str, Any]] | None,
+) -> str | None:
     return get_tag(
         tags,
         "Name",
     )
 
 
-def get_project_prefix():
+def get_project_prefix() -> str:
     return (
-        f"{Config.PROJECT_NAME}-"
-        f"{Config.ENVIRONMENT}"
+        f"{PROJECT_NAME}-"
+        f"{ENVIRONMENT}"
     )
 
 
-def get_expected_vpc_name():
+def get_expected_vpc_name() -> str:
     return (
         f"{get_project_prefix()}-vpc"
     )
 
 
-def get_short_name(resource_name):
+def get_short_name(
+    resource_name: str | None,
+) -> str | None:
     if not resource_name:
         return None
 
@@ -166,13 +175,15 @@ def get_short_name(resource_name):
         f"{get_project_prefix()}-"
     )
 
-    if not resource_name.startswith(prefix):
-        return resource_name
+    if resource_name.startswith(prefix):
+        return resource_name[len(prefix):]
 
-    return resource_name[len(prefix):]
+    return resource_name
 
 
-def get_default_route(route_table):
+def get_default_route(
+    route_table: dict[str, Any],
+) -> dict[str, Any] | None:
     for route in route_table.get(
         "Routes",
         [],
@@ -188,8 +199,8 @@ def get_default_route(route_table):
 
 def get_subnet_route_table(
     ec2,
-    subnet_id,
-):
+    subnet_id: str,
+) -> dict[str, Any] | None:
     response = ec2.describe_route_tables(
         Filters=[
             {
@@ -211,107 +222,103 @@ def get_subnet_route_table(
 
 
 def get_subnets_by_tier(
-    subnets,
-    tier,
-):
-    result = []
-
-    for subnet in subnets:
-        if (
-            get_tag(
-                subnet.get("Tags"),
-                "Tier",
-            )
-            == tier
-        ):
-            result.append(subnet)
-
-    return result
+    subnets: list[dict[str, Any]],
+    tier: str,
+) -> list[dict[str, Any]]:
+    return [
+        subnet
+        for subnet in subnets
+        if get_tag(
+            subnet.get("Tags"),
+            "Tier",
+        )
+        == tier
+    ]
 
 
 # ============================================================
-# VPC Discovery
+# VPC
 # ============================================================
 
-def find_project_vpc(ec2):
-    response = ec2.describe_vpcs()
-
+def find_project_vpc(
+    ec2,
+) -> dict[str, Any] | None:
     expected_name = (
         get_expected_vpc_name()
     )
 
-    matches = []
+    response = ec2.describe_vpcs(
+        Filters=[
+            {
+                "Name": "tag:Name",
+                "Values": [expected_name],
+            }
+        ]
+    )
 
-    for vpc in response.get(
+    vpcs = response.get(
         "Vpcs",
         [],
-    ):
-        if (
-            get_name(vpc.get("Tags"))
-            == expected_name
-        ):
-            matches.append(vpc)
+    )
 
-    if len(matches) != 1:
+    if len(vpcs) != 1:
         return None
 
-    return matches[0]
+    return vpcs[0]
 
-
-# ============================================================
-# VPC Validation
-# ============================================================
 
 def validate_vpc(
     ec2,
-    result,
-):
+    result: ValidationResult,
+) -> dict[str, Any] | None:
     section("VPC VALIDATION")
 
     vpc = find_project_vpc(ec2)
 
     if not vpc:
         result.failed(
-            f"Exactly one project VPC must exist: "
-            f"{get_expected_vpc_name()}"
+            "Expected exactly one VPC "
+            f"with Name={get_expected_vpc_name()}"
         )
         return None
 
     vpc_id = vpc["VpcId"]
 
     result.passed(
-        f"Project VPC found: {vpc_id}"
+        f"Project VPC exists: {vpc_id}"
     )
 
-    if (
-        vpc.get("State")
-        == "available"
-    ):
+    # State
+
+    state = vpc.get("State")
+
+    if state == "available":
         result.passed(
-            "VPC state is available"
+            "VPC state=available"
         )
     else:
         result.failed(
-            f"VPC state={vpc.get('State')} "
-            f"expected=available"
+            f"VPC state={state} "
+            "expected=available"
         )
 
-    if (
-        vpc.get("CidrBlock")
-        == EXPECTED_VPC_CIDR
-    ):
+    # CIDR
+
+    actual_cidr = vpc.get(
+        "CidrBlock"
+    )
+
+    if actual_cidr == EXPECTED_VPC_CIDR:
         result.passed(
             f"VPC CIDR={EXPECTED_VPC_CIDR}"
         )
     else:
         result.failed(
-            f"VPC CIDR={vpc.get('CidrBlock')} "
+            f"VPC CIDR={actual_cidr} "
             f"expected={EXPECTED_VPC_CIDR}"
         )
 
-    # --------------------------------------------------------
     # DNS Support
-    # --------------------------------------------------------
 
     dns_support_response = (
         ec2.describe_vpc_attribute(
@@ -322,14 +329,8 @@ def validate_vpc(
 
     dns_support = (
         dns_support_response
-        .get(
-            "EnableDnsSupport",
-            {},
-        )
-        .get(
-            "Value",
-            False,
-        )
+        .get("EnableDnsSupport", {})
+        .get("Value", False)
     )
 
     if dns_support:
@@ -341,9 +342,7 @@ def validate_vpc(
             "VPC DNS support is disabled"
         )
 
-    # --------------------------------------------------------
     # DNS Hostnames
-    # --------------------------------------------------------
 
     dns_hostnames_response = (
         ec2.describe_vpc_attribute(
@@ -354,14 +353,8 @@ def validate_vpc(
 
     dns_hostnames = (
         dns_hostnames_response
-        .get(
-            "EnableDnsHostnames",
-            {},
-        )
-        .get(
-            "Value",
-            False,
-        )
+        .get("EnableDnsHostnames", {})
+        .get("Value", False)
     )
 
     if dns_hostnames:
@@ -381,14 +374,14 @@ def validate_vpc(
 
 
 # ============================================================
-# Subnet Validation
+# Subnets
 # ============================================================
 
 def validate_subnets(
     ec2,
-    result,
-    vpc_id,
-):
+    result: ValidationResult,
+    vpc_id: str,
+) -> list[dict[str, Any]]:
     section("SUBNET VALIDATION")
 
     response = ec2.describe_subnets(
@@ -405,10 +398,6 @@ def validate_subnets(
         [],
     )
 
-    # --------------------------------------------------------
-    # Exact Count
-    # --------------------------------------------------------
-
     expected_count = len(
         EXPECTED_SUBNETS
     )
@@ -423,34 +412,31 @@ def validate_subnets(
             f"expected={expected_count}"
         )
 
-    # --------------------------------------------------------
-    # Build Name Map
-    # --------------------------------------------------------
-
-    actual = {}
+    actual_by_name: dict[
+        str,
+        dict[str, Any],
+    ] = {}
 
     for subnet in subnets:
         full_name = get_name(
             subnet.get("Tags")
         )
 
-        if not full_name:
-            continue
-
         short_name = get_short_name(
             full_name
         )
 
-        actual[short_name] = subnet
-
-    # --------------------------------------------------------
-    # Validate Expected Subnets
-    # --------------------------------------------------------
+        if short_name:
+            actual_by_name[
+                short_name
+            ] = subnet
 
     for name, expected in (
         EXPECTED_SUBNETS.items()
     ):
-        subnet = actual.get(name)
+        subnet = actual_by_name.get(
+            name
+        )
 
         if not subnet:
             result.failed(
@@ -458,7 +444,9 @@ def validate_subnets(
             )
             continue
 
-        subnet_id = subnet["SubnetId"]
+        subnet_id = subnet[
+            "SubnetId"
+        ]
 
         result.passed(
             f"Subnet exists: "
@@ -467,8 +455,12 @@ def validate_subnets(
 
         # CIDR
 
+        actual_cidr = subnet.get(
+            "CidrBlock"
+        )
+
         if (
-            subnet.get("CidrBlock")
+            actual_cidr
             == expected["cidr"]
         ):
             result.passed(
@@ -478,18 +470,18 @@ def validate_subnets(
         else:
             result.failed(
                 f"{name} CIDR="
-                f"{subnet.get('CidrBlock')} "
-                f"expected={expected['cidr']}"
+                f"{actual_cidr} "
+                f"expected="
+                f"{expected['cidr']}"
             )
 
-        # AZ
+        # Availability Zone
 
-        if (
-            subnet.get(
-                "AvailabilityZone"
-            )
-            == expected["az"]
-        ):
+        actual_az = subnet.get(
+            "AvailabilityZone"
+        )
+
+        if actual_az == expected["az"]:
             result.passed(
                 f"{name} AZ="
                 f"{expected['az']}"
@@ -497,55 +489,56 @@ def validate_subnets(
         else:
             result.failed(
                 f"{name} AZ="
-                f"{subnet.get('AvailabilityZone')} "
-                f"expected={expected['az']}"
+                f"{actual_az} "
+                f"expected="
+                f"{expected['az']}"
             )
 
         # Public IP
 
-        public_ip = subnet.get(
+        actual_public_ip = subnet.get(
             "MapPublicIpOnLaunch",
             False,
         )
 
         if (
-            public_ip
+            actual_public_ip
             == expected["public"]
         ):
             result.passed(
                 f"{name} "
-                f"MapPublicIpOnLaunch="
-                f"{expected['public']}"
+                "MapPublicIpOnLaunch="
+                f"{actual_public_ip}"
             )
         else:
             result.failed(
                 f"{name} "
-                f"MapPublicIpOnLaunch="
-                f"{public_ip} "
-                f"expected="
+                "MapPublicIpOnLaunch="
+                f"{actual_public_ip} "
+                "expected="
                 f"{expected['public']}"
             )
 
         # Tier Tag
 
-        tier = get_tag(
+        actual_tier = get_tag(
             subnet.get("Tags"),
             "Tier",
         )
 
         if (
-            tier
+            actual_tier
             == expected["tier"]
         ):
             result.passed(
                 f"{name} Tier="
-                f"{expected['tier']}"
+                f"{actual_tier}"
             )
         else:
             result.failed(
                 f"{name} Tier="
-                f"{tier} "
-                f"expected="
+                f"{actual_tier} "
+                "expected="
                 f"{expected['tier']}"
             )
 
@@ -553,14 +546,14 @@ def validate_subnets(
 
 
 # ============================================================
-# Internet Gateway Validation
+# Internet Gateway
 # ============================================================
 
 def validate_internet_gateway(
     ec2,
-    result,
-    vpc_id,
-):
+    result: ValidationResult,
+    vpc_id: str,
+) -> str | None:
     section(
         "INTERNET GATEWAY VALIDATION"
     )
@@ -569,7 +562,8 @@ def validate_internet_gateway(
         ec2.describe_internet_gateways(
             Filters=[
                 {
-                    "Name": "attachment.vpc-id",
+                    "Name":
+                    "attachment.vpc-id",
                     "Values": [vpc_id],
                 }
             ]
@@ -583,9 +577,9 @@ def validate_internet_gateway(
 
     if len(gateways) != 1:
         result.failed(
-            "Expected exactly 1 "
-            f"Internet Gateway, "
-            f"found {len(gateways)}"
+            "Internet Gateway count="
+            f"{len(gateways)} "
+            "expected=1"
         )
         return None
 
@@ -600,14 +594,12 @@ def validate_internet_gateway(
         f"{igw_id}"
     )
 
-    attachments = gateway.get(
-        "Attachments",
-        [],
-    )
-
     matching_attachment = None
 
-    for attachment in attachments:
+    for attachment in gateway.get(
+        "Attachments",
+        [],
+    ):
         if (
             attachment.get("VpcId")
             == vpc_id
@@ -624,30 +616,33 @@ def validate_internet_gateway(
         )
         return igw_id
 
-    state = matching_attachment.get(
-        "State"
+    attachment_state = (
+        matching_attachment.get(
+            "State"
+        )
     )
 
-    if state == "available":
+    if attachment_state == "attached":
         result.passed(
             "Internet Gateway "
-            "attachment is available"
+            "attachment state=attached"
         )
     else:
         result.failed(
-            f"Internet Gateway "
-            f"attachment state={state} "
-            f"expected=available"
+            "Internet Gateway "
+            f"attachment state="
+            f"{attachment_state} "
+            "expected=attached"
         )
 
     return igw_id
 
 
 # ============================================================
-# NAT Gateway Validation
+# NAT Gateway
 # ============================================================
 
-def get_expected_nat_count():
+def get_expected_nat_count() -> int:
     if (
         EXPECTED_NAT_GATEWAY_MODE
         == "none"
@@ -665,16 +660,16 @@ def get_expected_nat_count():
         == "one-per-az"
     ):
         public_azs = {
-            subnet["az"]
-            for subnet
+            config["az"]
+            for config
             in EXPECTED_SUBNETS.values()
-            if (
-                subnet["tier"]
-                == "public"
-            )
+            if config["tier"]
+            == "public"
         }
 
-        return len(public_azs)
+        return len(
+            public_azs
+        )
 
     raise ValueError(
         "NAT_GATEWAY_MODE must be "
@@ -684,21 +679,23 @@ def get_expected_nat_count():
 
 def validate_nat_gateways(
     ec2,
-    result,
-    vpc_id,
-    subnets,
-):
+    result: ValidationResult,
+    vpc_id: str,
+    subnets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     section(
         "NAT GATEWAY VALIDATION"
     )
 
-    response = ec2.describe_nat_gateways(
-        Filter=[
-            {
-                "Name": "vpc-id",
-                "Values": [vpc_id],
-            }
-        ]
+    response = (
+        ec2.describe_nat_gateways(
+            Filter=[
+                {
+                    "Name": "vpc-id",
+                    "Values": [vpc_id],
+                }
+            ]
+        )
     )
 
     nat_gateways = [
@@ -708,10 +705,8 @@ def validate_nat_gateways(
             "NatGateways",
             [],
         )
-        if (
-            nat.get("State")
-            != "deleted"
-        )
+        if nat.get("State")
+        != "deleted"
     ]
 
     expected_count = (
@@ -725,31 +720,24 @@ def validate_nat_gateways(
         result.passed(
             "NAT Gateway count="
             f"{expected_count} "
-            f"mode="
+            "mode="
             f"{EXPECTED_NAT_GATEWAY_MODE}"
         )
     else:
         result.failed(
-            f"NAT Gateway count="
+            "NAT Gateway count="
             f"{len(nat_gateways)} "
-            f"expected={expected_count} "
-            f"mode="
-            f"{EXPECTED_NAT_GATEWAY_MODE}"
+            f"expected={expected_count}"
         )
-
-    if expected_count == 0:
-        return nat_gateways
 
     public_subnet_ids = {
         subnet["SubnetId"]
         for subnet in subnets
-        if (
-            get_tag(
-                subnet.get("Tags"),
-                "Tier",
-            )
-            == "public"
+        if get_tag(
+            subnet.get("Tags"),
+            "Tier",
         )
+        == "public"
     }
 
     for nat in nat_gateways:
@@ -757,25 +745,21 @@ def validate_nat_gateways(
             "NatGatewayId"
         ]
 
-        # State
+        state = nat.get(
+            "State"
+        )
 
-        if (
-            nat.get("State")
-            == "available"
-        ):
+        if state == "available":
             result.passed(
                 f"NAT Gateway "
-                f"{nat_id} is available"
+                f"{nat_id} state=available"
             )
         else:
             result.failed(
                 f"NAT Gateway "
-                f"{nat_id} state="
-                f"{nat.get('State')} "
-                f"expected=available"
+                f"{nat_id} state={state} "
+                "expected=available"
             )
-
-        # Public subnet
 
         nat_subnet_id = nat.get(
             "SubnetId"
@@ -788,40 +772,43 @@ def validate_nat_gateways(
             result.passed(
                 f"NAT Gateway "
                 f"{nat_id} is in "
-                f"public subnet "
+                "public subnet "
                 f"{nat_subnet_id}"
             )
         else:
             result.failed(
                 f"NAT Gateway "
                 f"{nat_id} is not "
-                "located in an expected "
-                "public subnet"
+                "in a public subnet"
             )
-
-        # Connectivity Type
 
         connectivity = nat.get(
             "ConnectivityType"
         )
 
-        if connectivity:
-            if connectivity == "public":
-                result.passed(
-                    f"NAT Gateway "
-                    f"{nat_id} "
-                    "connectivity=public"
-                )
-            else:
-                result.failed(
-                    f"NAT Gateway "
-                    f"{nat_id} "
-                    f"connectivity="
-                    f"{connectivity} "
-                    f"expected=public"
-                )
+        if connectivity is None:
+            result.warning(
+                f"NAT Gateway "
+                f"{nat_id} "
+                "ConnectivityType "
+                "not returned by API"
+            )
 
-        # NAT Address
+        elif connectivity == "public":
+            result.passed(
+                f"NAT Gateway "
+                f"{nat_id} "
+                "ConnectivityType=public"
+            )
+
+        else:
+            result.failed(
+                f"NAT Gateway "
+                f"{nat_id} "
+                "ConnectivityType="
+                f"{connectivity} "
+                "expected=public"
+            )
 
         addresses = nat.get(
             "NatGatewayAddresses",
@@ -837,24 +824,23 @@ def validate_nat_gateways(
         else:
             result.warning(
                 f"NAT Gateway "
-                f"{nat_id} has no "
-                "NatGatewayAddresses "
-                "in API response"
+                f"{nat_id} API returned "
+                "no NatGatewayAddresses"
             )
 
     return nat_gateways
 
 
 # ============================================================
-# Public Route Validation
+# Public Routes
 # ============================================================
 
 def validate_public_routes(
     ec2,
-    result,
-    subnets,
-    igw_id,
-):
+    result: ValidationResult,
+    subnets: list[dict[str, Any]],
+    igw_id: str | None,
+) -> None:
     section(
         "PUBLIC ROUTE VALIDATION"
     )
@@ -865,6 +851,12 @@ def validate_public_routes(
             "public",
         )
     )
+
+    if not public_subnets:
+        result.failed(
+            "No public subnets found"
+        )
+        return
 
     if not igw_id:
         result.failed(
@@ -881,7 +873,7 @@ def validate_public_routes(
 
         name = get_name(
             subnet.get("Tags")
-        )
+        ) or subnet_id
 
         route_table = (
             get_subnet_route_table(
@@ -892,8 +884,9 @@ def validate_public_routes(
 
         if not route_table:
             result.failed(
-                f"{name} has no explicit "
-                "route table association"
+                f"{name} has no "
+                "explicit route table "
+                "association"
             )
             continue
 
@@ -905,7 +898,6 @@ def validate_public_routes(
 
         result.passed(
             f"{name} associated with "
-            f"route table "
             f"{route_table_id}"
         )
 
@@ -922,13 +914,13 @@ def validate_public_routes(
             )
             continue
 
-        gateway_id = (
+        actual_gateway_id = (
             default_route.get(
                 "GatewayId"
             )
         )
 
-        if gateway_id == igw_id:
+        if actual_gateway_id == igw_id:
             result.passed(
                 f"{name} "
                 f"0.0.0.0/0 -> "
@@ -937,23 +929,18 @@ def validate_public_routes(
         else:
             result.failed(
                 f"{name} "
-                f"0.0.0.0/0 -> "
-                f"{gateway_id} "
+                "0.0.0.0/0 -> "
+                f"{actual_gateway_id} "
                 f"expected={igw_id}"
             )
 
-        route_state = (
-            default_route.get(
-                "State"
-            )
+        state = default_route.get(
+            "State"
         )
 
-        if (
-            route_state
-            in (
-                None,
-                "active",
-            )
+        if state in (
+            None,
+            "active",
         ):
             result.passed(
                 f"{name} default "
@@ -962,35 +949,41 @@ def validate_public_routes(
         else:
             result.failed(
                 f"{name} default "
-                f"route state="
-                f"{route_state}"
+                f"route state={state}"
             )
 
 
 # ============================================================
-# Private Application Route Validation
+# Private Application Routes
 # ============================================================
 
 def get_nat_gateway_az_map(
-    nat_gateways,
-    subnets,
-):
-    subnet_az = {
+    nat_gateways: list[dict[str, Any]],
+    subnets: list[dict[str, Any]],
+) -> dict[str, str]:
+    subnet_az_map = {
         subnet["SubnetId"]:
         subnet.get(
-            "AvailabilityZone"
+            "AvailabilityZone",
+            "",
         )
         for subnet in subnets
     }
 
-    nat_by_az = {}
+    nat_by_az: dict[
+        str,
+        str,
+    ] = {}
 
     for nat in nat_gateways:
         subnet_id = nat.get(
             "SubnetId"
         )
 
-        az = subnet_az.get(
+        if not subnet_id:
+            continue
+
+        az = subnet_az_map.get(
             subnet_id
         )
 
@@ -1006,10 +999,12 @@ def get_nat_gateway_az_map(
 
 def validate_private_app_routes(
     ec2,
-    result,
-    subnets,
-    nat_gateways,
-):
+    result: ValidationResult,
+    subnets: list[dict[str, Any]],
+    nat_gateways: list[
+        dict[str, Any]
+    ],
+) -> None:
     section(
         "PRIVATE APPLICATION "
         "ROUTE VALIDATION"
@@ -1021,6 +1016,13 @@ def validate_private_app_routes(
             "private-app",
         )
     )
+
+    if not app_subnets:
+        result.failed(
+            "No private-app "
+            "subnets found"
+        )
+        return
 
     nat_ids = {
         nat["NatGatewayId"]
@@ -1041,7 +1043,7 @@ def validate_private_app_routes(
 
         name = get_name(
             subnet.get("Tags")
-        )
+        ) or subnet_id
 
         route_table = (
             get_subnet_route_table(
@@ -1058,16 +1060,10 @@ def validate_private_app_routes(
             )
             continue
 
-        route_table_id = (
-            route_table[
-                "RouteTableId"
-            ]
-        )
-
         result.passed(
             f"{name} associated "
-            f"with route table "
-            f"{route_table_id}"
+            "with route table "
+            f"{route_table['RouteTableId']}"
         )
 
         default_route = (
@@ -1076,9 +1072,7 @@ def validate_private_app_routes(
             )
         )
 
-        # ----------------------------------------------------
-        # NAT Mode = none
-        # ----------------------------------------------------
+        # NAT disabled
 
         if (
             EXPECTED_NAT_GATEWAY_MODE
@@ -1097,9 +1091,7 @@ def validate_private_app_routes(
 
             continue
 
-        # ----------------------------------------------------
-        # NAT Required
-        # ----------------------------------------------------
+        # NAT required
 
         if not default_route:
             result.failed(
@@ -1109,13 +1101,13 @@ def validate_private_app_routes(
             )
             continue
 
-        nat_gateway_id = (
+        actual_nat_id = (
             default_route.get(
                 "NatGatewayId"
             )
         )
 
-        if not nat_gateway_id:
+        if not actual_nat_id:
             result.failed(
                 f"{name} default route "
                 "does not target a "
@@ -1123,76 +1115,69 @@ def validate_private_app_routes(
             )
             continue
 
-        # ----------------------------------------------------
-        # Single NAT
-        # ----------------------------------------------------
-
         if (
             EXPECTED_NAT_GATEWAY_MODE
             == "single"
         ):
-            if (
-                nat_gateway_id
-                in nat_ids
-            ):
+            if actual_nat_id in nat_ids:
                 result.passed(
                     f"{name} "
-                    f"0.0.0.0/0 -> "
-                    f"{nat_gateway_id}"
+                    "0.0.0.0/0 -> "
+                    f"{actual_nat_id}"
                 )
             else:
                 result.failed(
-                    f"{name} default route "
-                    f"targets unknown NAT "
-                    f"{nat_gateway_id}"
+                    f"{name} "
+                    "default route targets "
+                    f"unknown NAT "
+                    f"{actual_nat_id}"
                 )
-
-        # ----------------------------------------------------
-        # NAT Per AZ
-        # ----------------------------------------------------
 
         elif (
             EXPECTED_NAT_GATEWAY_MODE
             == "one-per-az"
         ):
             az = subnet.get(
-                "AvailabilityZone"
+                "AvailabilityZone",
+                "",
             )
 
             expected_nat_id = (
-                nat_by_az.get(az)
+                nat_by_az.get(
+                    az
+                )
             )
 
             if (
-                nat_gateway_id
+                actual_nat_id
                 == expected_nat_id
             ):
                 result.passed(
                     f"{name} "
-                    f"0.0.0.0/0 -> "
-                    f"{nat_gateway_id} "
+                    "0.0.0.0/0 -> "
+                    f"{actual_nat_id} "
                     f"same AZ={az}"
                 )
             else:
                 result.failed(
                     f"{name} "
-                    f"0.0.0.0/0 -> "
-                    f"{nat_gateway_id} "
-                    f"expected NAT="
+                    "0.0.0.0/0 -> "
+                    f"{actual_nat_id} "
+                    "expected="
                     f"{expected_nat_id} "
-                    f"in AZ={az}"
+                    f"AZ={az}"
                 )
 
 
 # ============================================================
-# Private Database Route Validation
+# Private Database Routes
 # ============================================================
 
 def validate_private_db_routes(
     ec2,
-    result,
-    subnets,
-):
+    result: ValidationResult,
+    subnets: list[dict[str, Any]],
+) -> None:
     section(
         "PRIVATE DATABASE "
         "ROUTE VALIDATION"
@@ -1205,6 +1190,13 @@ def validate_private_db_routes(
         )
     )
 
+    if not db_subnets:
+        result.failed(
+            "No private-db "
+            "subnets found"
+        )
+        return
+
     for subnet in db_subnets:
         subnet_id = subnet[
             "SubnetId"
@@ -1212,7 +1204,7 @@ def validate_private_db_routes(
 
         name = get_name(
             subnet.get("Tags")
-        )
+        ) or subnet_id
 
         route_table = (
             get_subnet_route_table(
@@ -1229,16 +1221,10 @@ def validate_private_db_routes(
             )
             continue
 
-        route_table_id = (
-            route_table[
-                "RouteTableId"
-            ]
-        )
-
         result.passed(
             f"{name} associated "
-            f"with route table "
-            f"{route_table_id}"
+            "with route table "
+            f"{route_table['RouteTableId']}"
         )
 
         default_route = (
@@ -1252,50 +1238,54 @@ def validate_private_db_routes(
                 f"{name} has no "
                 "Internet default route"
             )
-        else:
-            target = (
-                default_route.get(
-                    "GatewayId"
-                )
-                or default_route.get(
-                    "NatGatewayId"
-                )
-                or default_route.get(
-                    "TransitGatewayId"
-                )
-                or "unknown"
-            )
+            continue
 
-            result.failed(
-                f"{name} has unexpected "
-                f"0.0.0.0/0 -> {target}"
+        target = (
+            default_route.get(
+                "GatewayId"
             )
+            or default_route.get(
+                "NatGatewayId"
+            )
+            or default_route.get(
+                "TransitGatewayId"
+            )
+            or default_route.get(
+                "NetworkInterfaceId"
+            )
+            or "unknown"
+        )
+
+        result.failed(
+            f"{name} has unexpected "
+            f"0.0.0.0/0 -> {target}"
+        )
 
 
 # ============================================================
-# S3 Gateway Endpoint Validation
+# S3 Gateway Endpoint
 # ============================================================
 
 def validate_s3_endpoint(
     ec2,
-    result,
-    vpc_id,
-    subnets,
-):
+    result: ValidationResult,
+    vpc_id: str,
+    subnets: list[dict[str, Any]],
+) -> None:
     section(
         "S3 VPC ENDPOINT VALIDATION"
     )
 
     if not REQUIRE_S3_ENDPOINT:
         result.warning(
-            "S3 endpoint validation "
-            "is disabled"
+            "S3 VPC Endpoint "
+            "validation disabled"
         )
         return
 
     service_name = (
         f"com.amazonaws."
-        f"{Config.AWS_REGION}.s3"
+        f"{AWS_REGION}.s3"
     )
 
     response = (
@@ -1306,7 +1296,8 @@ def validate_s3_endpoint(
                     "Values": [vpc_id],
                 },
                 {
-                    "Name": "service-name",
+                    "Name":
+                    "service-name",
                     "Values": [
                         service_name
                     ],
@@ -1322,9 +1313,9 @@ def validate_s3_endpoint(
 
     if len(endpoints) != 1:
         result.failed(
-            f"Expected exactly 1 "
-            f"S3 VPC Endpoint, "
-            f"found {len(endpoints)}"
+            "S3 VPC Endpoint count="
+            f"{len(endpoints)} "
+            "expected=1"
         )
         return
 
@@ -1339,9 +1330,7 @@ def validate_s3_endpoint(
         f"{endpoint_id}"
     )
 
-    # --------------------------------------------------------
     # Type
-    # --------------------------------------------------------
 
     endpoint_type = endpoint.get(
         "VpcEndpointType"
@@ -1354,38 +1343,34 @@ def validate_s3_endpoint(
         )
     else:
         result.failed(
-            f"S3 VPC Endpoint "
+            "S3 VPC Endpoint "
             f"type={endpoint_type} "
-            f"expected=Gateway"
+            "expected=Gateway"
         )
 
-    # --------------------------------------------------------
     # State
-    # --------------------------------------------------------
 
     endpoint_state = endpoint.get(
         "State"
     )
 
-    if endpoint_state in (
-        "available",
-        "pending",
-    ):
+    if endpoint_state == "available":
         result.passed(
-            f"S3 VPC Endpoint "
-            f"state={endpoint_state}"
+            "S3 VPC Endpoint "
+            "state=available"
         )
     else:
         result.failed(
-            f"S3 VPC Endpoint "
-            f"state={endpoint_state}"
+            "S3 VPC Endpoint "
+            f"state={endpoint_state} "
+            "expected=available"
         )
 
-    # --------------------------------------------------------
-    # Expected Route Tables
-    # --------------------------------------------------------
+    # Expected private RTs
 
-    expected_route_table_ids = set()
+    expected_route_table_ids: set[
+        str
+    ] = set()
 
     for tier in (
         "private-app",
@@ -1428,20 +1413,22 @@ def validate_s3_endpoint(
     if not missing_route_tables:
         result.passed(
             "S3 Gateway Endpoint "
-            "is attached to all "
-            "private app and DB "
-            "route tables"
+            "includes all private "
+            "app and DB route tables"
         )
     else:
         result.failed(
             "S3 Gateway Endpoint "
-            "missing route tables: "
+            "missing private route "
+            "tables: "
             f"{sorted(missing_route_tables)}"
         )
 
-    # Public RT should not be required
+    # Public Route Tables
 
-    public_route_table_ids = set()
+    public_route_table_ids: set[
+        str
+    ] = set()
 
     for subnet in (
         get_subnets_by_tier(
@@ -1469,10 +1456,10 @@ def validate_s3_endpoint(
     )
 
     if unexpected_public:
-        result.warning(
-            "S3 Gateway Endpoint is "
-            "also associated with "
-            "public route table(s): "
+        result.failed(
+            "S3 Gateway Endpoint "
+            "unexpectedly associated "
+            "with public route table: "
             f"{sorted(unexpected_public)}"
         )
     else:
@@ -1484,23 +1471,23 @@ def validate_s3_endpoint(
 
 
 # ============================================================
-# Optional Custom NACL Validation
+# Optional Network ACL
 # ============================================================
 
 def validate_network_acls(
     ec2,
-    result,
-    vpc_id,
-    subnets,
-):
+    result: ValidationResult,
+    vpc_id: str,
+    subnets: list[dict[str, Any]],
+) -> None:
     section(
         "NETWORK ACL VALIDATION"
     )
 
     if not REQUIRE_CUSTOM_NACLS:
         result.warning(
-            "Custom Network ACL "
-            "validation is disabled"
+            "Custom NACL validation "
+            "disabled"
         )
         return
 
@@ -1535,35 +1522,23 @@ def validate_network_acls(
         "private-db",
     }
 
-    nacls_by_tier = {}
-
-    for nacl in custom_nacls:
-        tier = get_tag(
-            nacl.get("Tags"),
-            "Tier",
-        )
-
-        if tier:
-            nacls_by_tier.setdefault(
-                tier,
-                [],
-            ).append(nacl)
-
     for tier in expected_tiers:
-        tier_nacls = (
-            nacls_by_tier.get(
-                tier,
-                [],
+        tier_nacls = [
+            nacl
+            for nacl in custom_nacls
+            if get_tag(
+                nacl.get("Tags"),
+                "Tier",
             )
-        )
+            == tier
+        ]
 
         if len(tier_nacls) != 1:
             result.failed(
-                f"Expected exactly "
-                f"1 custom NACL for "
-                f"tier={tier}, "
-                f"found "
-                f"{len(tier_nacls)}"
+                f"Custom NACL tier="
+                f"{tier} count="
+                f"{len(tier_nacls)} "
+                "expected=1"
             )
             continue
 
@@ -1578,19 +1553,17 @@ def validate_network_acls(
         expected_subnet_ids = {
             subnet["SubnetId"]
             for subnet in subnets
-            if (
-                get_tag(
-                    subnet.get("Tags"),
-                    "Tier",
-                )
-                == tier
+            if get_tag(
+                subnet.get("Tags"),
+                "Tier",
             )
+            == tier
         }
 
         actual_subnet_ids = {
-            association.get(
+            association[
                 "SubnetId"
-            )
+            ]
             for association
             in nacl.get(
                 "Associations",
@@ -1602,8 +1575,8 @@ def validate_network_acls(
         }
 
         if (
-            expected_subnet_ids
-            == actual_subnet_ids
+            actual_subnet_ids
+            == expected_subnet_ids
         ):
             result.passed(
                 f"NACL tier={tier} "
@@ -1614,20 +1587,19 @@ def validate_network_acls(
             result.failed(
                 f"NACL tier={tier} "
                 "subnet associations "
-                "do not match expected "
-                "subnets"
+                "are incorrect"
             )
 
 
 # ============================================================
-# Optional Flow Log Validation
+# Optional VPC Flow Logs
 # ============================================================
 
 def validate_flow_logs(
     ec2,
-    result,
-    vpc_id,
-):
+    result: ValidationResult,
+    vpc_id: str,
+) -> None:
     section(
         "VPC FLOW LOG VALIDATION"
     )
@@ -1635,17 +1607,20 @@ def validate_flow_logs(
     if not REQUIRE_FLOW_LOGS:
         result.warning(
             "VPC Flow Log validation "
-            "is disabled"
+            "disabled"
         )
         return
 
-    response = ec2.describe_flow_logs(
-        Filter=[
-            {
-                "Name": "resource-id",
-                "Values": [vpc_id],
-            }
-        ]
+    response = (
+        ec2.describe_flow_logs(
+            Filter=[
+                {
+                    "Name":
+                    "resource-id",
+                    "Values": [vpc_id],
+                }
+            ]
+        )
     )
 
     flow_logs = response.get(
@@ -1660,16 +1635,14 @@ def validate_flow_logs(
         return
 
     result.passed(
-        f"VPC Flow Log count="
+        "VPC Flow Log count="
         f"{len(flow_logs)}"
     )
 
     for flow_log in flow_logs:
-        flow_log_id = (
-            flow_log.get(
-                "FlowLogId",
-                "-",
-            )
+        flow_log_id = flow_log.get(
+            "FlowLogId",
+            "-",
         )
 
         traffic_type = (
@@ -1688,41 +1661,44 @@ def validate_flow_logs(
             result.failed(
                 f"Flow Log "
                 f"{flow_log_id} "
-                f"TrafficType="
+                "TrafficType="
                 f"{traffic_type} "
-                f"expected=ALL"
+                "expected=ALL"
             )
 
         status = flow_log.get(
             "FlowLogStatus"
         )
 
-        if status:
-            if status in (
-                "ACTIVE",
-                "active",
-            ):
-                result.passed(
-                    f"Flow Log "
-                    f"{flow_log_id} "
-                    f"status={status}"
-                )
-            else:
-                result.failed(
-                    f"Flow Log "
-                    f"{flow_log_id} "
-                    f"status={status}"
-                )
+        if status is None:
+            result.warning(
+                f"Flow Log "
+                f"{flow_log_id} "
+                "status not returned"
+            )
+
+        elif status.upper() == "ACTIVE":
+            result.passed(
+                f"Flow Log "
+                f"{flow_log_id} "
+                "status=ACTIVE"
+            )
+
+        else:
+            result.failed(
+                f"Flow Log "
+                f"{flow_log_id} "
+                f"status={status} "
+                "expected=ACTIVE"
+            )
 
 
 # ============================================================
-# Network Validation
+# Main Network Validation
 # ============================================================
 
-def validate_network():
+def validate_network() -> ValidationResult:
     result = ValidationResult()
-
-    ec2 = get_ec2_client()
 
     section(
         "NETWORK VALIDATION START"
@@ -1730,17 +1706,17 @@ def validate_network():
 
     print(
         f"[INFO] Project="
-        f"{Config.PROJECT_NAME}"
+        f"{PROJECT_NAME}"
     )
 
     print(
         f"[INFO] Environment="
-        f"{Config.ENVIRONMENT}"
+        f"{ENVIRONMENT}"
     )
 
     print(
         f"[INFO] Region="
-        f"{Config.AWS_REGION}"
+        f"{AWS_REGION}"
     )
 
     print(
@@ -1748,21 +1724,23 @@ def validate_network():
         f"{EXPECTED_NAT_GATEWAY_MODE}"
     )
 
-    # --------------------------------------------------------
-    # Connectivity
-    # --------------------------------------------------------
+    # Validate configuration first
 
-    ec2.describe_vpcs(
-        MaxResults=5
-    )
+    get_expected_nat_count()
+
+    # EC2 Client
+
+    ec2 = get_ec2_client()
+
+    # Connectivity test
+
+    ec2.describe_vpcs()
 
     result.passed(
         "EC2 API connection successful"
     )
 
-    # --------------------------------------------------------
     # VPC
-    # --------------------------------------------------------
 
     vpc = validate_vpc(
         ec2,
@@ -1776,9 +1754,7 @@ def validate_network():
         "VpcId"
     ]
 
-    # --------------------------------------------------------
     # Subnets
-    # --------------------------------------------------------
 
     subnets = validate_subnets(
         ec2,
@@ -1786,9 +1762,7 @@ def validate_network():
         vpc_id,
     )
 
-    # --------------------------------------------------------
-    # Internet Gateway
-    # --------------------------------------------------------
+    # IGW
 
     igw_id = (
         validate_internet_gateway(
@@ -1798,9 +1772,7 @@ def validate_network():
         )
     )
 
-    # --------------------------------------------------------
     # NAT Gateway
-    # --------------------------------------------------------
 
     nat_gateways = (
         validate_nat_gateways(
@@ -1811,9 +1783,7 @@ def validate_network():
         )
     )
 
-    # --------------------------------------------------------
-    # Routes
-    # --------------------------------------------------------
+    # Public Route
 
     validate_public_routes(
         ec2,
@@ -1822,6 +1792,8 @@ def validate_network():
         igw_id,
     )
 
+    # Private App Route
+
     validate_private_app_routes(
         ec2,
         result,
@@ -1829,15 +1801,15 @@ def validate_network():
         nat_gateways,
     )
 
+    # Private DB Route
+
     validate_private_db_routes(
         ec2,
         result,
         subnets,
     )
 
-    # --------------------------------------------------------
-    # S3 VPC Endpoint
-    # --------------------------------------------------------
+    # S3 Endpoint
 
     validate_s3_endpoint(
         ec2,
@@ -1846,9 +1818,7 @@ def validate_network():
         subnets,
     )
 
-    # --------------------------------------------------------
-    # Optional Controls
-    # --------------------------------------------------------
+    # Optional NACL
 
     validate_network_acls(
         ec2,
@@ -1856,6 +1826,8 @@ def validate_network():
         vpc_id,
         subnets,
     )
+
+    # Optional Flow Logs
 
     validate_flow_logs(
         ec2,
@@ -1870,24 +1842,23 @@ def validate_network():
 # Summary
 # ============================================================
 
-def print_summary(result):
+def print_summary(
+    result: ValidationResult,
+) -> int:
     section(
         "VALIDATION SUMMARY"
     )
 
     print(
-        f"PASS : "
-        f"{result.pass_count}"
+        f"PASS : {result.pass_count}"
     )
 
     print(
-        f"WARN : "
-        f"{result.warn_count}"
+        f"WARN : {result.warn_count}"
     )
 
     print(
-        f"FAIL : "
-        f"{result.fail_count}"
+        f"FAIL : {result.fail_count}"
     )
 
     print()
@@ -1897,7 +1868,6 @@ def print_summary(result):
             "[SUCCESS] "
             "Network validation passed."
         )
-
         return 0
 
     print(
@@ -1909,12 +1879,14 @@ def print_summary(result):
 
 
 # ============================================================
-# Main
+# Entry Point
 # ============================================================
 
-def main():
+def main() -> None:
     try:
-        result = validate_network()
+        result = (
+            validate_network()
+        )
 
         exit_code = (
             print_summary(
@@ -1928,8 +1900,9 @@ def main():
 
     except EndpointConnectionError as exc:
         print(
-            "\n[ERROR] Unable to connect "
-            "to LocalStack/AWS endpoint:"
+            "\n[ERROR] Unable to "
+            "connect to LocalStack/"
+            "AWS endpoint:"
         )
         print(exc)
 
@@ -1942,17 +1915,17 @@ def main():
         )
 
         print(
-            "\n[ERROR] AWS API request "
-            "failed:"
+            "\n[ERROR] AWS API "
+            "request failed"
         )
 
         print(
-            f"Code="
+            "Code="
             f"{error.get('Code', '-')}"
         )
 
         print(
-            f"Message="
+            "Message="
             f"{error.get('Message', '-')}"
         )
 
@@ -1960,8 +1933,17 @@ def main():
 
     except BotoCoreError as exc:
         print(
-            "\n[ERROR] Boto3/Botocore "
-            f"error: {exc}"
+            "\n[ERROR] "
+            "Boto3/Botocore error: "
+            f"{exc}"
+        )
+
+        sys.exit(2)
+
+    except ValueError as exc:
+        print(
+            "\n[ERROR] Invalid "
+            f"configuration: {exc}"
         )
 
         sys.exit(2)

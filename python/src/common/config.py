@@ -1,7 +1,8 @@
 import os
 
+
 class Config:
-    AWS_REGION =os.getnv(
+    AWS_REGION = os.getenv(
         "AWS_REGION",
         "ap-northeast-1",
     )
@@ -21,12 +22,12 @@ class Config:
         "test",
     )
 
-    ENVIRONMENT = os.getenv(
-        "ENVIRONMENT",
-        "localstack",
-    )
-
     PROJECT_NAME = os.getenv(
         "PROJECT_NAME",
         "aws-enterprise-lab",
+    )
+
+    ENVIRONMENT = os.getenv(
+        "ENVIRONMENT",
+        "localstack",
     )
