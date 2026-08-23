@@ -11,6 +11,7 @@ module "ec2" {
   ami_id        = var.ec2_ami_id
   instance_type = var.ec2_instance_type
 
+
   # ==========================================================
   # Network
   # ==========================================================
@@ -19,10 +20,12 @@ module "ec2" {
   # application subnets.
   subnet_ids = module.network.private_app_subnet_ids
 
-  # Attach the dedicated application security group.
-  security_group_ids = [
-    module.security.app_security_group_id
-  ]
+  # LocalStack compatibility:
+  # - true  -> VPC default security group
+  # - false -> enterprise application security group
+  #
+  # The actual selection logic is defined in security.tf.
+  security_group_ids = local.ec2_effective_security_group_ids
 
 
   # ==========================================================
@@ -38,7 +41,7 @@ module "ec2" {
   # Network Security Baseline
   # ==========================================================
 
-  # Private application instances must not receive public IPs.
+  # Application instances must remain private.
   associate_public_ip_address = false
 
 
@@ -57,9 +60,7 @@ module "ec2" {
   root_volume_size      = var.ec2_root_volume_size
   root_volume_type      = var.ec2_root_volume_type
   root_volume_encrypted = true
-
-  kms_key_id = var.ec2_kms_key_id
-
+  kms_key_id            = var.ec2_kms_key_id
   delete_on_termination = var.ec2_delete_on_termination
 
 
