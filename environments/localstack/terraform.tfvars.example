@@ -86,3 +86,25 @@ create_internet_gateway = true
 # ============================================================
 
 nat_gateway_mode = "single"
+
+# ============================================================
+# EC2
+# ============================================================
+
+ec2_ami_id       = "ami-df5de72bdb3b"
+ec2_instance_type = "t3.micro"
+
+ec2_security_group_ids   = []
+ec2_iam_instance_profile = null
+
+ec2_enable_detailed_monitoring = false
+ec2_ebs_optimized              = false
+
+ec2_root_volume_size      = 20
+ec2_root_volume_type      = "gp3"
+ec2_kms_key_id            = null
+ec2_delete_on_termination = true
+
+ec2_metadata_hop_limit = 1
+
+ec2_prevent_destroy = false

@@ -130,3 +130,106 @@ variable "private_app_subnets" {
     availability_zone = string
   }))
 }
+
+# ============================================================
+# EC2
+# ============================================================
+
+variable "ec2_ami_id" {
+  description = "AMI ID used by application EC2 instances"
+  type        = string
+
+  validation {
+    condition     = can(regex("^ami-[0-9A-Za-z]+$", var.ec2_ami_id))
+    error_message = "ec2_ami_id must be a valid AMI identifier."
+  }
+}
+
+variable "ec2_instance_type" {
+  description = "EC2 instance type used by application instances"
+  type        = string
+  default     = "t3.micro"
+
+  validation {
+    condition     = length(trimspace(var.ec2_instance_type)) > 0
+    error_message = "ec2_instance_type cannot be empty."
+  }
+}
+
+variable "ec2_security_group_ids" {
+  description = "Security group IDs attached to application EC2 instances"
+  type        = list(string)
+  default     = []
+}
+
+variable "ec2_iam_instance_profile" {
+  description = "IAM instance profile name attached to application EC2 instances"
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "ec2_enable_detailed_monitoring" {
+  description = "Whether EC2 detailed monitoring is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "ec2_ebs_optimized" {
+  description = "Whether EBS optimization is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "ec2_root_volume_size" {
+  description = "Root EBS volume size in GiB"
+  type        = number
+  default     = 20
+
+  validation {
+    condition     = var.ec2_root_volume_size >= 8 && var.ec2_root_volume_size <= 1024
+    error_message = "ec2_root_volume_size must be between 8 and 1024 GiB."
+  }
+}
+
+variable "ec2_root_volume_type" {
+  description = "Root EBS volume type"
+  type        = string
+  default     = "gp3"
+
+  validation {
+    condition     = contains(["gp2", "gp3"], var.ec2_root_volume_type)
+    error_message = "ec2_root_volume_type must be gp2 or gp3."
+  }
+}
+
+variable "ec2_kms_key_id" {
+  description = "Optional KMS key ARN or ID used for root EBS encryption"
+  type        = string
+  default     = null
+  nullable    = true
+}
+
+variable "ec2_delete_on_termination" {
+  description = "Whether the root EBS volume is deleted when the EC2 instance is terminated"
+  type        = bool
+  default     = true
+}
+
+variable "ec2_metadata_hop_limit" {
+  description = "IMDS response hop limit"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.ec2_metadata_hop_limit >= 1 && var.ec2_metadata_hop_limit <= 64
+    error_message = "ec2_metadata_hop_limit must be between 1 and 64."
+  }
+}
+
+variable "ec2_user_data" {
+  description = "Optional user data passed to application EC2 instances"
+  type        = string
+  default     = null
+  nullable    = true
+}
