@@ -161,3 +161,58 @@ output "ec2_subnet_ids" {
   description = "Map of subnet IDs used by application EC2 instances"
   value       = module.ec2.subnet_ids
 }
+
+output "s3_bucket_id" {
+  description = "ID of the S3 bucket"
+  value       = module.s3.bucket_id
+}
+
+output "s3_bucket_name" {
+  description = "Name of the LocalStack S3 bucket"
+  value       = module.s3.bucket_name
+}
+
+output "s3_bucket_arn" {
+  description = "ARN of the LocalStack S3 bucket"
+  value       = module.s3.bucket_arn
+}
+
+output "s3_bucket_domain_name" {
+  description = "Domain name of the LocalStack S3 bucket"
+  value       = module.s3.bucket_domain_name
+}
+
+output "s3_bucket_regional_domain_name" {
+  description = "Regional domain name of the LocalStack S3 bucket"
+  value       = module.s3.bucket_regional_domain_name
+}
+
+output "s3_versioning_status" {
+  description = "Versioning status of the LocalStack S3 bucket"
+  value       = module.s3.versioning_status
+}
+
+output "s3_encryption_algorithm" {
+  description = "Configured server-side encryption algorithm of the LocalStack S3 bucket"
+  value       = module.s3.encryption_algorithm
+}
+
+output "s3_kms_key_arn" {
+  description = "KMS key ARN used by the LocalStack S3 bucket when SSE-KMS is enabled"
+  value       = module.s3.kms_key_arn
+}
+
+output "s3_bucket_key_enabled" {
+  description = "Whether S3 Bucket Key is effectively enabled"
+  value       = module.s3.bucket_key_enabled
+}
+
+output "s3_public_access_block_enabled" {
+  description = "Whether all public access protections are enabled"
+  value       = module.s3.public_access_block_enabled
+}
+
+output "s3_lifecycle_enabled" {
+  description = "Whether S3 lifecycle management is configured to be enabled"
+  value       = module.s3.lifecycle_enabled
+}

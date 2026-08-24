@@ -351,3 +351,163 @@ variable "iam_enable_cloudwatch_agent" {
   type        = bool
   default     = true
 }
+
+
+# ============================================================
+# S3
+# ============================================================
+
+variable "s3_bucket_name" {
+  description = "Name of the S3 bucket used by the LocalStack environment"
+  type        = string
+
+  validation {
+    condition = (
+      length(var.s3_bucket_name) >= 3 &&
+      length(var.s3_bucket_name) <= 63 &&
+      can(regex("^[a-z0-9][a-z0-9.-]*[a-z0-9]$", var.s3_bucket_name))
+    )
+
+    error_message = "s3_bucket_name must be 3-63 characters and use valid lowercase S3 bucket naming characters."
+  }
+}
+
+variable "s3_force_destroy" {
+  description = "Whether Terraform may delete a non-empty S3 bucket"
+  type        = bool
+  default     = true
+}
+
+
+# ============================================================
+# S3 - Versioning
+# ============================================================
+
+variable "s3_versioning_enabled" {
+  description = "Whether S3 bucket versioning is enabled"
+  type        = bool
+  default     = true
+}
+
+
+# ============================================================
+# S3 - Encryption
+# ============================================================
+
+variable "s3_encryption_algorithm" {
+  description = "Server-side encryption algorithm used by the S3 bucket"
+  type        = string
+  default     = "AES256"
+
+  validation {
+    condition = contains(
+      [
+        "AES256",
+        "aws:kms"
+      ],
+      var.s3_encryption_algorithm
+    )
+
+    error_message = "s3_encryption_algorithm must be AES256 or aws:kms."
+  }
+}
+
+variable "s3_kms_key_arn" {
+  description = "Optional KMS key ARN used when SSE-KMS encryption is enabled"
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      var.s3_kms_key_arn == null ||
+      can(regex("^arn:aws:kms:", var.s3_kms_key_arn))
+    )
+
+    error_message = "s3_kms_key_arn must be null or a valid KMS key ARN."
+  }
+}
+
+variable "s3_bucket_key_enabled" {
+  description = "Whether S3 Bucket Key is enabled when SSE-KMS is used"
+  type        = bool
+  default     = false
+}
+
+
+# ============================================================
+# S3 - Public Access Block
+# ============================================================
+
+variable "s3_block_public_acls" {
+  description = "Whether S3 public ACLs are blocked"
+  type        = bool
+  default     = true
+}
+
+variable "s3_ignore_public_acls" {
+  description = "Whether S3 public ACLs are ignored"
+  type        = bool
+  default     = true
+}
+
+variable "s3_block_public_policy" {
+  description = "Whether S3 public bucket policies are blocked"
+  type        = bool
+  default     = true
+}
+
+variable "s3_restrict_public_buckets" {
+  description = "Whether public S3 buckets are restricted"
+  type        = bool
+  default     = true
+}
+
+
+# ============================================================
+# S3 - Lifecycle
+# ============================================================
+
+variable "s3_lifecycle_enabled" {
+  description = "Whether S3 lifecycle management is enabled"
+  type        = bool
+  default     = false
+}
+
+variable "s3_transition_days" {
+  description = "Number of days before S3 objects transition to STANDARD_IA"
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = var.s3_transition_days >= 1
+    error_message = "s3_transition_days must be at least 1."
+  }
+}
+
+variable "s3_expiration_days" {
+  description = "Number of days before S3 objects expire"
+  type        = number
+  default     = 365
+
+  validation {
+    condition     = var.s3_expiration_days >= 1
+    error_message = "s3_expiration_days must be at least 1."
+  }
+
+  validation {
+    condition     = var.s3_expiration_days > var.s3_transition_days
+    error_message = "s3_expiration_days must be greater than s3_transition_days."
+  }
+}
+
+variable "s3_noncurrent_version_expiration_days" {
+  description = "Number of days before noncurrent S3 object versions expire"
+  type        = number
+  default     = 90
+
+  validation {
+    condition     = var.s3_noncurrent_version_expiration_days >= 1
+    error_message = "s3_noncurrent_version_expiration_days must be at least 1."
+  }
+}
