@@ -217,9 +217,11 @@ for subnet_role in app-a app-c; do
             "ImageId"
     )"
 
-    [["${ACTUAL_AMI}" == "${EXPECTED_AMI_ID}"]] \
-        ||fail "${subnet_role} AMI=${ACTUAL_AMI}, expected=${EXPECTED_AMI_ID}"
-    pass "${subnet_role} AMI is correct"
+    if [[ "${ACTUAL_AMI}" == "${EXPECTED_AMI_ID}" ]]; then
+        pass "${subnet_role} AMI is correct"
+    else
+        fail "${subnet_role} AMI=${ACTUAL_AMI}, expected=${EXPECTED_AMI_ID}"
+    fi
 
     ACTUAL_INSTANCE_TYPE="$(
         get_instance_value \
